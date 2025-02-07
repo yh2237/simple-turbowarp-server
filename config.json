@@ -1,6 +1,0 @@
-{
-    "port": "9080",
-    "ip_filter_enabled": true,
-    "ip_filter_path": "data/ip_filter.json",
-    "cloud_data_path": "data/cloud_data.json"
-}
