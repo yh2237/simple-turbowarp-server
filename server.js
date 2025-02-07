@@ -1,26 +1,31 @@
 const express = require("express");
+const moment = require("moment");
 const http = require("http");
 const WebSocket = require("ws");
 const fs = require("fs");
-const moment = require("moment");
 const path = require("path");
+const chalk = require("chalk");
+const yaml = require("js-yaml");
 
-const CONFIG_FILE = "./config.json";
+const CONFIG_FILE = "./config/config.yml";
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/data', express.static(path.join(__dirname, './data')));
-
 let config = {};
 if (fs.existsSync(CONFIG_FILE)) {
-    config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    config = yaml.load(fs.readFileSync(CONFIG_FILE, "utf8"));
+}
+
+if (config.HTTP_response) {
+    app.use(express.static(path.join(__dirname, 'public')));
+    app.use('/data', express.static(path.join(__dirname, './data')));
 }
 
 const PORT = config.port;
 const DATA_FILE = config.cloud_data_path;
+const LANG = config.language
 
 let cloudData = {};
 if (fs.existsSync(DATA_FILE)) {
@@ -28,19 +33,32 @@ if (fs.existsSync(DATA_FILE)) {
 }
 
 let blockedIps = [];
-if (config.ip_filter_enabled && fs.existsSync(config.ip_filter_path)) {
+if (config.ip_filter && fs.existsSync(config.ip_filter_path)) {
     blockedIps = JSON.parse(fs.readFileSync(config.ip_filter_path, "utf8")).ips;
 }
 
+// =================================================================================================================
+
+// banner表示
+if (config.banner) {
+    const banner = fs.readFileSync("./config/banner.txt", 'utf8');
+    console.log(banner)
+}
+
 const currentTime = moment();
-console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}][INFO] TurboWarp クラウド変数サーバーがポート ${PORT} で起動しました`);
+console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} Server started on port: ${PORT}`);
 
 wss.on("connection", (ws, req) => {
     const clientIP = req.socket.remoteAddress;
 
-    if (config.ip_filter_enabled && blockedIps.includes(clientIP)) {
+    // ipフィルター処理
+    if (config.ip_filter && blockedIps.includes(clientIP)) {
         const currentTime = moment();
-        console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}][INFO] 接続拒否されたIP: ${clientIP}`);
+        if (LANG == "ja") {
+            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} 接続拒否されたIP: ${clientIP}`);
+        } else {
+            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} Rejected IP: ${clientIP}`);
+        }
         ws.close();
         return;
     }
@@ -59,12 +77,16 @@ wss.on("connection", (ws, req) => {
 
             if (data.method === "handshake") {
                 const currentTime = moment();
-                console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}][INFO] クライアントが接続しました IP: ${clientIP} ${JSON.stringify(data)}`);
+                if (LANG == "ja") {
+                    console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} クライアントが接続しました IP: ${clientIP} ${JSON.stringify(data)}`);
+                } else {
+                    console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} The client connected IP: ${clientIP} ${JSON.stringify(data)}`);
+                }
                 return;
             }
 
             const currentTime = moment();
-            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}][RECEIVED] IP: ${clientIP} ${JSON.stringify(data)}`);
+            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.blue("[RECEIVED]")} IP: ${clientIP} ${JSON.stringify(data)}`);
 
             if (data.method === "set" && data.name && typeof data.value !== "undefined") {
                 const variableName = data.name;
@@ -81,13 +103,18 @@ wss.on("connection", (ws, req) => {
             }
         } catch (error) {
             const currentTime = moment();
-            console.error(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}][ERROR] JSONの解析エラー:`, error);
+            console.error(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.red("[ERROR]")} JSONerror:`, error);
         }
     });
 
+    // 切断処理
     ws.on("close", () => {
         const currentTime = moment();
-        console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}][INFO] IP: ${clientIP} クライアントが切断しました`);
+        if (LANG == "ja") {
+            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} クライアントが切断しました IP: ${clientIP}`);
+        } else {
+            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} Client disconnected IP: ${clientIP}`);
+        }
     });
 });
 
@@ -99,18 +126,27 @@ function broadcast(message) {
     });
 }
 
+// httpリクエストされた時用のやつ
 app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "public", "index.html"));
+    if (config.HTTP_response) {
+        res.sendFile(path.join(__dirname, "public", "index.html"));
+    } else {
+        res.status(403).send("403 Forbidden");
+    }
 });
 
 app.get("/:file", (req, res) => {
-    const filePath = path.join(__dirname, "public", req.params.file);
-    if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
-        res.sendFile(filePath);
+    if (config.HTTP_response) {
+        const filePath = path.join(__dirname, "public", req.params.file);
+        if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
+            res.sendFile(filePath);
+        } else {
+            res.status(404).send("404 Not Found");
+            const currentTime = moment();
+            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.red("[ERROR]")} ${chalk.bgRed("[404]")} IP: ${req.ip} PATH: ${filePath}`)
+        }
     } else {
-        res.status(404).send("404 Not Found");
-        const currentTime = moment();
-        console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}][ERROR] [404] IP: ${req.ip} PATH: ${filePath}`)
+        res.status(403).send("403 Forbidden");
     }
 });
 

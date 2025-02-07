@@ -1,0 +1,8 @@
+port: "9080"
+ip_filter: true
+banner: true
+HTTP_response: true
+# Only en or ja languages ​​are supported
+language: "ja"
+ip_filter_path: "config/ip_filter.json"
+cloud_data_path: "data/cloud_data.json"
