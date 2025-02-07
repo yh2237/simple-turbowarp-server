@@ -1,5 +1,5 @@
 port: "9080"
-ip_filter: true
+ip_filter: false
 banner: true
 HTTP_response: true
 # Only en or ja languages ​​are supported
