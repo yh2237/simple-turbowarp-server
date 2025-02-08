@@ -1,8 +1,11 @@
 port: "9080"
+max_log_lines: "500"
 ip_filter: false
+name_filter: false
 banner: true
 HTTP_response: true
-# Only en or ja languages ​​are supported
-language: "en"
+log_to_file: true
 ip_filter_path: "config/ip_filter.json"
+name_filter_path: "config/name_filter.json"
 cloud_data_path: "data/cloud_data.json"
+log_file_path: "logs/server.log"

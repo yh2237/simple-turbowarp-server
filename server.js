@@ -6,8 +6,9 @@ const fs = require("fs");
 const path = require("path");
 const chalk = require("chalk");
 const yaml = require("js-yaml");
+const { log } = require("./logger");
 
-const CONFIG_FILE = "./config/config.yml";
+const CONFIG_FILE = "config/config.yml";
 
 const app = express();
 const server = http.createServer(app);
@@ -25,7 +26,6 @@ if (config.HTTP_response) {
 
 const PORT = config.port;
 const DATA_FILE = config.cloud_data_path;
-const LANG = config.language
 
 let cloudData = {};
 if (fs.existsSync(DATA_FILE)) {
@@ -37,32 +37,34 @@ if (config.ip_filter && fs.existsSync(config.ip_filter_path)) {
     blockedIps = JSON.parse(fs.readFileSync(config.ip_filter_path, "utf8")).ips;
 }
 
+let blockedNames = [];
+if (config.name_filter && fs.existsSync(config.name_filter_path)) {
+    blockedNames = JSON.parse(fs.readFileSync(config.name_filter_path, "utf8")).names;
+}
+
+console.log(blockedNames);
+
 // =================================================================================================================
 
 // banner表示
 if (config.banner) {
     const banner = fs.readFileSync("./config/banner.txt", 'utf8');
-    console.log(banner)
+    log("INFO", `\n${banner}`);
 }
 
-const currentTime = moment();
-console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} Server started on port: ${PORT}`);
+log("INFO", `Server started on port: ${PORT}`);
 
 wss.on("connection", (ws, req) => {
     const clientIP = req.socket.remoteAddress;
 
-    // ipフィルター処理
+    // IPフィルター処理
     if (config.ip_filter && blockedIps.includes(clientIP)) {
-        const currentTime = moment();
-        if (LANG == "ja") {
-            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} 接続拒否されたIP: ${clientIP}`);
-        } else {
-            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} Rejected IP: ${clientIP}`);
-        }
-        ws.close();
+        log("INFO", `Rejected IP: ${clientIP}`);
+        ws.close(1008, 'Forbidden');
         return;
     }
 
+    // 接続してきたクライアントに変数を渡す
     for (let key in cloudData) {
         ws.send(JSON.stringify({
             method: "set",
@@ -75,19 +77,22 @@ wss.on("connection", (ws, req) => {
         try {
             const data = JSON.parse(message);
 
-            if (data.method === "handshake") {
-                const currentTime = moment();
-                if (LANG == "ja") {
-                    console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} クライアントが接続しました IP: ${clientIP} ${JSON.stringify(data)}`);
-                } else {
-                    console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} The client connected IP: ${clientIP} ${JSON.stringify(data)}`);
-                }
+            // NAMEフィルター処理
+            if (config.name_filter && blockedNames.includes(data.user)) {
+                log("INFO", `Rejected Name: ${JSON.stringify(data.user)} IP: ${clientIP}`);
+                ws.close(1008, 'Forbidden');
                 return;
             }
 
-            const currentTime = moment();
-            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.blue("[RECEIVED]")} IP: ${clientIP} ${JSON.stringify(data)}`);
+            // クライアント接続処理
+            if (data.method === "handshake") {
+                log("INFO", `Client connected IP: ${clientIP} ${JSON.stringify(data)}`);
+                return;
+            }
 
+            log("RECEIVED", `IP: ${clientIP} ${JSON.stringify(data)}`);
+
+            // 変数受け取り処理
             if (data.method === "set" && data.name && typeof data.value !== "undefined") {
                 const variableName = data.name;
                 const value = data.value;
@@ -102,19 +107,24 @@ wss.on("connection", (ws, req) => {
                 }));
             }
         } catch (error) {
-            const currentTime = moment();
-            console.error(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.red("[ERROR]")} JSONerror:`, error);
+            log("ERROR", `Unknown format error: ${error}`);
         }
     });
 
-    // 切断処理
-    ws.on("close", () => {
-        const currentTime = moment();
-        if (LANG == "ja") {
-            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} クライアントが切断しました IP: ${clientIP}`);
-        } else {
-            console.log(`[${currentTime.format("YYYY-MM-DD-HH:mm:ss")}]${chalk.green("[INFO]")} Client disconnected IP: ${clientIP}`);
-        }
+    // ☠PONG☠
+    ws.on("pong", (code) => {
+        ws.send("pong!");
+        log("INFO", `IP: ${clientIP} code: ${code}`);
+    });
+
+    // エラーが出たとき用
+    ws.on("error", (error) => {
+        log("ERROR", `IP: ${clientIP} error: ${error}`);
+    });
+
+    // クライアント切断処理
+    ws.on("close", (code) => {
+        log("INFO", `Client disconnected IP: ${clientIP} code: ${code}`);
     });
 });
 
@@ -126,7 +136,7 @@ function broadcast(message) {
     });
 }
 
-// httpリクエストされた時用のやつ
+// httpリクエスト処理
 app.get("/", (req, res) => {
     if (config.HTTP_response) {
         res.sendFile(path.join(__dirname, "public", "index.html"));
